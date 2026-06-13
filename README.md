@@ -150,4 +150,10 @@ mlflow ui --port 5000
 
 ## Tech Stack
 
-Python · FastAPI · Streamlit · sentence-transformers · FAISS · rank-bm25 · Anthropic Claude · RAGAS · MLflow · SQLite · Docker
+Python · FastAPI · Streamlit · sentence-transformers · FAISS · rank-bm25 · Groq (Llama 3.1) · RAGAS · MLflow · SQLite · Docker 
+
+## Demo
+
+![Demo 1](screenshots/demo1.png)
+![Demo 2](screenshots/demo2.png)
+![Demo 3](screenshots/demo3.png)
