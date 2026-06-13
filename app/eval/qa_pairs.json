@@ -1,0 +1,14 @@
+[
+  {
+    "question": "What is the main topic of the uploaded document?",
+    "ground_truth": "Replace this with the actual answer based on your document."
+  },
+  {
+    "question": "What are the key findings or conclusions?",
+    "ground_truth": "Replace this with the actual answer based on your document."
+  },
+  {
+    "question": "Who are the main entities mentioned in the document?",
+    "ground_truth": "Replace this with the actual answer based on your document."
+  }
+]
