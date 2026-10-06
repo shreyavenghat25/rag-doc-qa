@@ -4,7 +4,7 @@ Ask questions about your own PDFs, web pages, or text and get answers grounded i
 
 The retrieval pipeline combines lexical (BM25) and semantic (dense vector) search, fuses them with Reciprocal Rank Fusion, and reranks the candidates with a cross-encoder before the LLM writes an answer. Answers stream token by token over Server-Sent Events.
 
-**Live demo:** https://shreya-rag-docs.streamlit.app — click "Try a sample" in the sidebar to ask questions about this README, or upload your own PDF.
+**Live demo: [shreya-rag-docs.streamlit.app](https://shreya-rag-docs.streamlit.app)** — click "Try a sample" in the sidebar to ask questions about this README, or upload your own PDF.
 
 ## Architecture
 
@@ -146,6 +146,8 @@ Python · FastAPI · Streamlit · sentence-transformers · FAISS · rank-bm25 ·
 
 ## Demo
 
-![Demo 1](screenshots/demo1.png)
-![Demo 2](screenshots/demo2.png)
-![Demo 3](screenshots/demo3.png)
+Uploading a PDF and asking for a summary on the [live demo](https://shreya-rag-docs.streamlit.app). Each point cites the chunk it came from:
+
+![Answer with inline citations](screenshots/demo1.png)
+
+![Sources and latency](screenshots/demo2.png)
