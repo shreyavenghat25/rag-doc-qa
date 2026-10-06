@@ -148,6 +148,6 @@ Python · FastAPI · Streamlit · sentence-transformers · FAISS · rank-bm25 ·
 
 Uploading a PDF and asking for a summary on the [live demo](https://shreya-rag-docs.streamlit.app). Each point cites the chunk it came from:
 
-![Answer with inline citations](screenshots/demo1.png)
+![Answer with inline citations](screenshots/live-demo-1.png)
 
-![Sources and latency](screenshots/demo2.png)
+![Sources and latency](screenshots/live-demo-2.png)
