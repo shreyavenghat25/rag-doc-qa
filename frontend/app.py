@@ -1,25 +1,51 @@
 """
 Streamlit frontend for RAG Document Q&A.
-Run: streamlit run frontend/app.py
+
+Local (with the FastAPI service running):   streamlit run frontend/app.py
+Self-contained demo (no API server needed): RAG_MODE=embedded streamlit run frontend/app.py
 """
 import html
-import json
 import os
+import sys
+from pathlib import Path
 
-import requests
 import streamlit as st
 
-# Local: defaults to the API on :8000. Docker / deployed: set API_BASE in the environment.
-API_BASE = os.getenv("API_BASE", "http://localhost:8000/api/v1").rstrip("/")
-REQUEST_TIMEOUT = 120  # first query loads the reranker model, which can take a while
+# Put the repo root first on the path so `import app...` resolves to the backend
+# package, not to this file (which Streamlit runs from the frontend/ folder).
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-st.set_page_config(
-    page_title="RAG Document Q&A",
-    page_icon="🔍",
-    layout="wide"
-)
+from frontend.backends import ApiBackend, BackendError, EmbeddedBackend  # noqa: E402
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+MODE = os.getenv("RAG_MODE", "api").lower()          # "api" | "embedded"
+API_BASE = os.getenv("API_BASE", "http://localhost:8000/api/v1")
+SAMPLE_DOC = ROOT / "README.md"
+
+st.set_page_config(page_title="RAG Document Q&A", page_icon="🔍", layout="wide")
+
+
+# ─── Backend selection ───────────────────────────────────────────────────────
+@st.cache_resource(show_spinner="Loading embedding model (first visit only)…")
+def warm_up_models():
+    """Load the shared models once per process, not once per visitor."""
+    from app.core.embedder import get_embedder
+    return get_embedder()
+
+
+def get_backend():
+    if MODE != "embedded":
+        return ApiBackend(API_BASE)
+    if "rag_session" not in st.session_state:
+        warm_up_models()
+        from app.core.session import RAGSession
+        st.session_state.rag_session = RAGSession()  # private index for this visitor
+    return EmbeddedBackend(st.session_state.rag_session)
+
+
+backend = get_backend()
+
+# ─── CSS ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
   .citation-box {
@@ -31,41 +57,22 @@ st.markdown("""
     font-size: 13px;
     color: inherit;
   }
-  .metric-row { display: flex; gap: 1rem; margin-bottom: 1rem; }
-  .stAlert { border-radius: 8px; }
-  .answer-block {
-    background: #f9f9f9;
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    border: 1px solid #e0e0e0;
-    line-height: 1.7;
-  }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-def error_detail(resp: requests.Response, fallback: str) -> str:
-    """Pull FastAPI's error detail out of a response, even if the body isn't JSON."""
-    try:
-        detail = resp.json().get("detail", fallback)
-    except ValueError:
-        detail = resp.text or fallback
-    return f"{fallback} ({resp.status_code}): {detail}"
-
-
-def index_request(method_path: str, spinner: str, **kwargs):
-    """POST to an indexing endpoint and show success / failure in the sidebar."""
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+def run_index(spinner: str, fn, *args):
     with st.spinner(spinner):
         try:
-            r = requests.post(f"{API_BASE}/{method_path}", timeout=REQUEST_TIMEOUT, **kwargs)
-        except requests.RequestException as e:
-            st.error(f"API not reachable at {API_BASE}: {e}")
+            result = fn(*args)
+        except BackendError as e:
+            st.error(str(e))
             return
-    if r.ok:
-        st.success(f"✅ Indexed {r.json()['chunks']} chunks")
+    if result.get("status") == "duplicate":
+        st.info("This document is already indexed.")
     else:
-        st.error(error_detail(r, "Indexing failed"))
+        st.success(f"✅ Indexed {result['chunks']} chunks")
 
 
 def render_citations(citations: list[dict]):
@@ -94,141 +101,116 @@ def render_meta(meta: dict):
     cols[2].metric("Tokens used", meta.get("tokens_used") or "–")
 
 
-# ─── Sidebar — Document Upload ─────────────────────────────────────────────
+# ─── Sidebar — documents & settings ──────────────────────────────────────────
 with st.sidebar:
     st.title("📄 Documents")
+
+    if MODE == "embedded":
+        st.caption("Your documents are private to this browser tab and are cleared when you close it.")
+        if SAMPLE_DOC.exists() and st.button("Try a sample: this project's README"):
+            run_index("Indexing sample…", backend.index_text, SAMPLE_DOC.read_text(), "README.md")
 
     tab_upload, tab_url, tab_text = st.tabs(["PDF", "URL", "Text"])
 
     with tab_upload:
-        uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
         use_semantic = st.checkbox("Semantic chunking", value=True, key="sem_pdf")
-        if st.button("Index PDF", disabled=uploaded_file is None):
-            index_request(
-                "upload", "Indexing...",
-                files={"file": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")},
-                params={"use_semantic_chunking": use_semantic},
-            )
+        uploaded_file = st.file_uploader("Upload PDF (indexed automatically)", type=["pdf"])
+        # Index as soon as a file is chosen; remember it so reruns don't re-index.
+        indexed_uploads = st.session_state.setdefault("indexed_uploads", set())
+        if uploaded_file is not None and uploaded_file.file_id not in indexed_uploads:
+            indexed_uploads.add(uploaded_file.file_id)
+            run_index(f"Indexing {uploaded_file.name}…", backend.index_pdf,
+                      uploaded_file.getvalue(), uploaded_file.name, use_semantic)
 
     with tab_url:
         url_input = st.text_input("URL", placeholder="https://en.wikipedia.org/wiki/...")
         use_semantic_url = st.checkbox("Semantic chunking", value=True, key="sem_url")
         if st.button("Index URL", disabled=not url_input):
-            index_request(
-                "index/url", "Fetching & indexing...",
-                json={"url": url_input, "use_semantic_chunking": use_semantic_url},
-            )
+            run_index("Fetching & indexing…", backend.index_url, url_input, use_semantic_url)
 
     with tab_text:
         text_input = st.text_area("Paste text", height=150)
         text_name = st.text_input("Label", value="pasted_text")
         if st.button("Index Text", disabled=not text_input):
-            index_request(
-                "index/text", "Indexing...",
-                json={"text": text_input, "filename": text_name},
-            )
+            run_index("Indexing…", backend.index_text, text_input, text_name)
 
     st.divider()
     st.subheader("📚 Indexed Documents")
+    docs = []
     try:
-        docs_resp = requests.get(f"{API_BASE}/documents", timeout=3)
-        if docs_resp.ok:
-            docs = docs_resp.json()["documents"]
-            if docs:
-                for doc in docs:
-                    st.markdown(f"- **{doc['filename']}** ({doc['total_chunks']} chunks)")
-            else:
-                st.caption("No documents indexed yet.")
-    except requests.RequestException:
-        st.caption(f"API not reachable at {API_BASE}")
+        docs = backend.list_documents()
+        if docs:
+            for doc in docs:
+                st.markdown(f"- **{html.escape(doc['filename'])}** ({doc['total_chunks']} chunks)")
+        else:
+            st.caption("No documents indexed yet.")
+    except BackendError as e:
+        st.caption(str(e))
 
     st.divider()
     st.subheader("⚙️ Retrieval Settings")
     top_k_retrieve = st.slider("Candidates to retrieve", 5, 50, 20)
     top_k_rerank = st.slider("Final chunks after rerank", 1, 10, 5)
     use_reranker = st.checkbox("Use cross-encoder reranker", value=True)
-    use_streaming = st.checkbox("Stream response", value=False)
+    use_streaming = st.checkbox("Stream response", value=True)
 
 
-# ─── Main — Chat Interface ─────────────────────────────────────────────────
+# ─── Main — chat ─────────────────────────────────────────────────────────────
 st.title("🔍 RAG Document Q&A")
 st.caption("Hybrid BM25 + dense retrieval · cross-encoder reranking · inline citations")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         render_citations(msg.get("citations", []))
         render_meta(msg.get("meta", {}))
 
-# Query input
-if query := st.chat_input("Ask a question about your documents..."):
+if not docs:
+    st.info("👈 Add a document first: upload a PDF, paste text, or click **Try a sample** in the sidebar.")
+
+if query := st.chat_input(
+    "Ask a question about your documents..." if docs else "Add a document to start asking questions",
+    disabled=not docs,
+):
     st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
 
     with st.chat_message("assistant"):
-        params = {
-            "query": query,
-            "top_k_retrieve": top_k_retrieve,
-            "top_k_rerank": top_k_rerank,
-        }
         full_text, citations, meta = "", [], {}
 
         if use_streaming:
             placeholder = st.empty()
             try:
-                with requests.get(
-                    f"{API_BASE}/query/stream", params=params, stream=True, timeout=REQUEST_TIMEOUT
-                ) as resp:
-                    resp.raise_for_status()
-                    for line in resp.iter_lines(decode_unicode=True):
-                        if not line or not line.startswith("data: "):
-                            continue
-                        data_str = line[6:]
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            event = json.loads(data_str)
-                        except json.JSONDecodeError:
-                            continue
-                        if event["type"] == "token":
-                            full_text += event["text"]
-                            placeholder.markdown(full_text + "▌")
-                        elif event["type"] == "citations":
-                            citations = event.get("citations", [])
-                            meta = {"latency_ms": event.get("latency_ms")}
-                        elif event["type"] == "error":
-                            st.error(f"Generation failed: {event.get('text')}")
-                placeholder.markdown(full_text or "_No answer generated._")
-            except requests.RequestException as e:
-                st.error(f"Streaming request failed: {e}")
-                full_text = full_text or "Error during streaming."
-
+                for event in backend.query_stream(query, top_k_retrieve, top_k_rerank):
+                    if event["type"] == "token":
+                        full_text += event["text"]
+                        placeholder.markdown(full_text + "▌")
+                    elif event["type"] == "citations":
+                        citations = event.get("citations", [])
+                        meta = {"latency_ms": event.get("latency_ms")}
+                    elif event["type"] == "error":
+                        st.error(f"Generation failed: {event.get('text')}")
+            except BackendError as e:
+                st.error(str(e))
+            full_text = full_text or "Error during streaming."
+            placeholder.markdown(full_text)
         else:
-            with st.spinner("Retrieving and generating..."):
+            with st.spinner("Retrieving and generating…"):
                 try:
-                    r = requests.post(
-                        f"{API_BASE}/query",
-                        json={**params, "use_reranker": use_reranker},
-                        timeout=REQUEST_TIMEOUT,
-                    )
-                except requests.RequestException as e:
-                    r = None
-                    st.error(f"API not reachable at {API_BASE}: {e}")
-
-            if r is not None and r.ok:
-                result = r.json()
+                    result = backend.query(query, top_k_retrieve, top_k_rerank, use_reranker)
+                except BackendError as e:
+                    result = None
+                    st.error(str(e))
+            if result:
                 full_text = result["answer"]
                 citations = result.get("citations", [])
                 meta = {k: result.get(k) for k in ("latency_ms", "chunks_retrieved", "tokens_used")}
                 st.markdown(full_text)
             else:
-                if r is not None:
-                    st.error(error_detail(r, "Query failed"))
                 full_text = "Query failed."
 
         render_citations(citations)

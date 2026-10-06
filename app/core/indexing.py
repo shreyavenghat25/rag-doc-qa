@@ -32,17 +32,21 @@ def index_text(text: str, filename: str = "plain_text", use_semantic_chunking: b
     return _index_pages(pages, filename, "text", use_semantic_chunking)
 
 
+def chunk_pages(pages: list[dict], embedder, use_semantic: bool) -> list[dict]:
+    """Semantic chunking with a recursive-split fallback when it yields too few chunks."""
+    if use_semantic and pages:
+        chunks = semantic_chunk(pages, embedder)
+        if len(chunks) < 3:
+            chunks = recursive_character_split(pages)
+        return chunks
+    return recursive_character_split(pages)
+
+
 def _index_pages(pages: list[dict], source: str, source_type: str, use_semantic: bool) -> dict:
     embedder = get_embedder()
     faiss_index = get_faiss_index(embedder.dimension)
 
-    # Chunking
-    if use_semantic and len(pages) > 0:
-        chunks = semantic_chunk(pages, embedder)
-        if len(chunks) < 3:  # fallback if too few chunks
-            chunks = recursive_character_split(pages)
-    else:
-        chunks = recursive_character_split(pages)
+    chunks = chunk_pages(pages, embedder, use_semantic)
 
     if not chunks:
         return {"error": "No text extracted from document", "chunks": 0}

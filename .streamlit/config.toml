@@ -1,0 +1,3 @@
+[server]
+# Matches the demo's per-file limit (app/core/session.py MAX_PDF_BYTES).
+maxUploadSize = 10

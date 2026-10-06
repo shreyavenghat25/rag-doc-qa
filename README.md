@@ -4,6 +4,8 @@ Ask questions about your own PDFs, web pages, or text and get answers grounded i
 
 The retrieval pipeline combines lexical (BM25) and semantic (dense vector) search, fuses them with Reciprocal Rank Fusion, and reranks the candidates with a cross-encoder before the LLM writes an answer. Answers stream token by token over Server-Sent Events.
 
+**Live demo:** _link coming soon_ — click "Try a sample" in the sidebar to ask questions about this README, or upload your own PDF.
+
 ## Architecture
 
 ```
@@ -62,6 +64,12 @@ uvicorn app.main:app --port 8000        # API  → http://localhost:8000/docs
 streamlit run frontend/app.py           # UI   → http://localhost:8501  (second terminal)
 ```
 
+Self-contained mode (no API server; the UI runs the pipeline in-process, as the hosted demo does):
+
+```bash
+RAG_MODE=embedded streamlit run frontend/app.py
+```
+
 Or with Docker:
 
 ```bash
@@ -94,6 +102,10 @@ API at http://localhost:8000/docs, UI at http://localhost:8501, MLflow at http:/
 
 **Non-blocking streaming.** The SSE endpoint runs retrieval and the blocking LLM stream in a worker thread, so one long answer does not stall other requests on the event loop.
 
+**Two deployment modes, one pipeline.** The Streamlit UI talks to a backend interface with two implementations: an HTTP client for the FastAPI service (local and Docker), and an embedded mode that calls the same pipeline in-process (the hosted demo, where only one process is available). Retrieval, reranking, and generation code is identical in both.
+
+**Per-visitor isolation in the demo.** The API keeps one persistent index. A public demo can't, or every visitor would search everyone else's uploads. In embedded mode each browser session gets a private in-memory FAISS index and chunk store, while the embedding model and reranker are loaded once and shared. Re-uploading the same file is detected by content hash and skipped, and sessions are capped at 5 documents to keep memory bounded on a free host.
+
 **Citation mapping.** The model is prompted to cite `[Source N]`; the server parses those markers (tolerating `[N]` and `[Source 1, 3]` variants) and maps them back to the retrieved chunk, file, and page.
 
 ## Evaluation
@@ -118,7 +130,11 @@ rag-doc-qa/
 │   ├── database.py            # SQLite metadata store
 │   ├── config.py              # Settings via pydantic-settings
 │   └── main.py                # FastAPI app
-├── frontend/app.py            # Streamlit UI
+├── app/core/session.py        # Per-visitor in-memory index (demo mode)
+├── frontend/
+│   ├── app.py                 # Streamlit UI
+│   ├── backends.py            # API client / embedded backend
+│   └── requirements.txt       # Lean CPU-only deps for the hosted demo
 ├── Dockerfile
 ├── docker-compose.yml
 └── requirements.txt

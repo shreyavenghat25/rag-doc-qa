@@ -9,26 +9,35 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder
 from app.config import settings
-from app.database import get_chunks_by_faiss_ids, get_all_chunks
+from app import database
+
+_reranker: CrossEncoder | None = None
+
+
+def get_reranker() -> CrossEncoder:
+    """The cross-encoder is stateless, so one instance is shared by every retriever."""
+    global _reranker
+    if _reranker is None:
+        print("[Retriever] Loading cross-encoder reranker...")
+        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _reranker
 
 
 class HybridRetriever:
-    def __init__(self, embedder, faiss_index):
+    def __init__(self, embedder, faiss_index, store=None):
+        """
+        store: anything with get_all_chunks() and get_chunks_by_faiss_ids(ids).
+        Defaults to the SQLite database; the demo uses an in-memory store per session.
+        """
         self.embedder = embedder
         self.faiss_index = faiss_index
+        self.store = store or database
         self._bm25: BM25Okapi | None = None
         self._corpus: list[dict] | None = None  # all chunks for BM25
-        self._reranker: CrossEncoder | None = None
-
-    def _get_reranker(self) -> CrossEncoder:
-        if self._reranker is None:
-            print("[Retriever] Loading cross-encoder reranker...")
-            self._reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-        return self._reranker
 
     def _build_bm25(self):
-        """Build or rebuild BM25 index from all chunks in DB."""
-        self._corpus = get_all_chunks()
+        """Build or rebuild BM25 index from all chunks in the store."""
+        self._corpus = self.store.get_all_chunks()
         if not self._corpus:
             self._bm25 = None
             return
@@ -91,7 +100,7 @@ class HybridRetriever:
         Cross-encoder reranking: scores each (query, chunk) pair precisely.
         Much slower than embedding similarity but far more accurate.
         """
-        reranker = self._get_reranker()
+        reranker = get_reranker()
         pairs = [(query, c["text"]) for c in candidates]
         scores = reranker.predict(pairs)
 
@@ -134,7 +143,7 @@ class HybridRetriever:
 
         # Get top candidates for reranking
         candidate_faiss_ids = [faiss_id for faiss_id, _ in fused[:top_k_retrieve]]
-        candidates = get_chunks_by_faiss_ids(candidate_faiss_ids)
+        candidates = self.store.get_chunks_by_faiss_ids(candidate_faiss_ids)
 
         # Add RRF scores to candidates
         rrf_score_map = {faiss_id: score for faiss_id, score in fused}

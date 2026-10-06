@@ -10,14 +10,16 @@ from app.config import settings
 
 
 class FAISSIndex:
-    def __init__(self, dimension: int, index_path: str = None):
+    def __init__(self, dimension: int, index_path: str = None, persist: bool = True):
+        """persist=False keeps the index in memory only (used for per-session demo indexes)."""
         self.dimension = dimension
+        self.persist = persist
         self.index_path = index_path or settings.faiss_index_path
         self.index = self._load_or_create()
 
     def _load_or_create(self) -> faiss.Index:
         path = Path(self.index_path)
-        if path.exists():
+        if self.persist and path.exists():
             print(f"[FAISS] Loading existing index from {path}")
             return faiss.read_index(str(path))
         else:
@@ -62,6 +64,8 @@ class FAISSIndex:
         return list(ids), list(distances)
 
     def save(self):
+        if not self.persist:
+            return
         path = Path(self.index_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self.index, str(path))
