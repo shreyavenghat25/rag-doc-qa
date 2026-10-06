@@ -3,12 +3,12 @@
 # The full stack (FastAPI, RAGAS, MLflow) lives in the root requirements.txt.
 
 # CPU-only PyTorch: the default PyPI wheel bundles ~2 GB of CUDA libraries a CPU host never uses.
+# The CPU index only keeps recent releases, so keep this pin current (same version as local dev).
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.5.1+cpu
+torch==2.14.1+cpu
 
 sentence-transformers==3.1.1
-faiss-cpu==1.9.0.post1
-numpy==1.26.4
+faiss-cpu>=1.9.0.post1
 rank-bm25==0.2.2
 pymupdf==1.25.5
 beautifulsoup4==4.12.3
