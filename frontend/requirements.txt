@@ -1,6 +1,8 @@
 # Lean dependencies for the hosted demo (Streamlit Community Cloud, RAG_MODE=embedded).
 # Streamlit Cloud reads this file because it sits next to the entrypoint, frontend/app.py.
 # The full stack (FastAPI, RAGAS, MLflow) lives in the root requirements.txt.
+# Every pin here has a prebuilt wheel for Python 3.11-3.14 (the cloud picks the Python version),
+# so nothing has to compile from source on the host.
 
 # CPU-only PyTorch: the default PyPI wheel bundles ~2 GB of CUDA libraries a CPU host never uses.
 # The CPU index only keeps recent releases, so keep this pin current (same version as local dev).
@@ -8,13 +10,13 @@
 torch==2.14.1+cpu
 
 sentence-transformers==3.1.1
-faiss-cpu>=1.9.0.post1
+faiss-cpu==1.15.1
 rank-bm25==0.2.2
-pymupdf==1.25.5
-beautifulsoup4==4.12.3
-requests==2.32.3
+pymupdf==1.28.2
+beautifulsoup4==4.15.0
+requests==2.34.2
 groq==1.7.0
-pydantic==2.9.1
-pydantic-settings==2.5.2
-python-dotenv==1.0.1
-streamlit==1.38.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+python-dotenv==1.2.4
+streamlit==1.65.0
