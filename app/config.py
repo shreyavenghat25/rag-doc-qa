@@ -3,10 +3,9 @@ from pathlib import Path
 
 
 class Settings(BaseSettings):
-    llm_provider: str = "groq"
     groq_api_key: str = ""
-    llm_model: str = "llama-3.1-8b-instant"
-    anthropic_api_key: str = ""
+    llm_model: str = "openai/gpt-oss-20b"
+    reasoning_effort: str = "low"  # only used by gpt-oss models
     max_tokens: int = 1024
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     chunk_size: int = 512

@@ -8,7 +8,7 @@ from app.database import init_db
 
 app = FastAPI(
     title="RAG Document Q&A",
-    description="FAANG-grade RAG pipeline: hybrid retrieval + reranking + citations + RAGAS eval",
+    description="Document Q&A with hybrid BM25 + dense retrieval, cross-encoder reranking, and inline citations",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
