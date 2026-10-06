@@ -110,7 +110,27 @@ API at http://localhost:8000/docs, UI at http://localhost:8501, MLflow at http:/
 
 ## Evaluation
 
-An evaluation harness (`app/eval/ragas_eval.py`) computes RAGAS faithfulness, answer relevancy, context recall, and context precision and logs runs to MLflow. A benchmark question set and results comparing retrieval configurations (dense-only, BM25-only, hybrid, hybrid + reranker) are in progress and will be published here.
+Retrieval is benchmarked on [BEIR SciFact](https://github.com/beir-cellar/beir): 5,183 scientific abstracts and 300 test queries with expert relevance labels. All four configurations run on the same index with 20 candidates per query.
+
+| Configuration | nDCG@10 | MRR@10 | Recall@5 | Recall@10 | Recall@20 | Latency / query |
+|---|---|---|---|---|---|---|
+| BM25 only | 0.560 | 0.524 | 0.616 | 0.686 | 0.737 | 8 ms |
+| Dense only (bge-small) | **0.717** | **0.681** | **0.762** | **0.842** | 0.875 | 18 ms |
+| Hybrid (RRF) | 0.679 | 0.640 | 0.734 | 0.823 | **0.882** | 21 ms |
+| Hybrid + cross-encoder rerank | 0.700 | 0.666 | 0.746 | 0.832 | **0.882** | 301 ms |
+
+*Measured on a MacBook Air (CPU). Reproduce with `python -m app.eval.retrieval_eval`; runs are also logged to MLflow.*
+
+**What the numbers show**
+
+- Dense retrieval alone is the strongest configuration on this dataset.
+- BM25 scores 0.560 nDCG@10, about 0.1 below the published BEIR BM25 baseline (0.665). The tokenizer here is a plain whitespace split with no stemming or stop-word removal, which is the likely cause.
+- Hybrid fusion finds the most relevant documents overall (best Recall@20) but ranks them worse than dense alone: equal-weight RRF lets the weaker BM25 ranking pull good dense results down.
+- Cross-encoder reranking recovers part of that gap (0.679 → 0.700) at roughly 280 ms extra per query. The reranker (ms-marco-MiniLM) was trained on web search, not scientific text.
+
+**Next experiments:** proper BM25 tokenization, weighted fusion, and reranking dense candidates directly, each measured with the same benchmark.
+
+`app/eval/ragas_eval.py` is a separate harness for end-to-end answer quality (faithfulness, relevancy) with RAGAS; it needs a question/answer set for your own documents.
 
 ## Project Structure
 
@@ -126,7 +146,8 @@ rag-doc-qa/
 │   │   ├── retriever.py       # BM25 + dense + RRF + reranker
 │   │   ├── generator.py       # Prompt, Groq call, citation parsing
 │   │   └── indexing.py        # Ingestion orchestration
-│   ├── eval/ragas_eval.py     # RAGAS evaluation + MLflow logging
+│   ├── eval/retrieval_eval.py # BEIR retrieval benchmark (nDCG, MRR, Recall)
+│   ├── eval/ragas_eval.py     # RAGAS answer-quality harness
 │   ├── database.py            # SQLite metadata store
 │   ├── config.py              # Settings via pydantic-settings
 │   └── main.py                # FastAPI app

@@ -3,10 +3,17 @@ FAISS index using HNSWFlat for approximate nearest-neighbour search.
 HNSWFlat: no training needed, good recall, fast at query time.
 """
 import os
+import sys
 import numpy as np
 import faiss
 from pathlib import Path
 from app.config import settings
+
+# On macOS, PyTorch and FAISS each ship their own OpenMP runtime. When both are
+# loaded, FAISS's multi-threaded HNSW build can segfault on large batches.
+# Single-threaded FAISS avoids the clash; HNSW search/add stays fast at this scale.
+if sys.platform == "darwin":
+    faiss.omp_set_num_threads(1)
 
 
 class FAISSIndex:
