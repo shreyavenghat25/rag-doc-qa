@@ -4,7 +4,7 @@ Ask questions about your own PDFs, web pages, or text and get answers grounded i
 
 The retrieval pipeline combines lexical (BM25) and semantic (dense vector) search, fuses them with Reciprocal Rank Fusion, and reranks the candidates with a cross-encoder before the LLM writes an answer. Answers stream token by token over Server-Sent Events.
 
-**Live demo:** _link coming soon_ — click "Try a sample" in the sidebar to ask questions about this README, or upload your own PDF.
+**Live demo:** https://shreya-rag-docs.streamlit.app — click "Try a sample" in the sidebar to ask questions about this README, or upload your own PDF.
 
 ## Architecture
 
