@@ -9,14 +9,14 @@ GET  /documents     — list indexed documents
 GET  /health        — health check
 """
 import json
-import asyncio
+import time
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
 from app.core.indexing import index_pdf, index_url, index_text
 from app.core.retriever import get_retriever
-from app.core.generator import generate_answer
+from app.core.generator import generate_answer, extract_citations
 from app.database import list_documents
 
 router = APIRouter()
@@ -122,52 +122,48 @@ async def query(request: QueryRequest):
 
 
 @router.get("/query/stream")
-async def query_stream(
+def query_stream(
     query: str,
     top_k_retrieve: int = 20,
     top_k_rerank: int = 5
 ):
     """
     SSE streaming query endpoint.
-    Returns chunks as server-sent events.
+    Events: {"type": "token"} ... {"type": "citations"} then [DONE].
+
+    Declared with plain `def` (not async) so FastAPI runs retrieval in a
+    worker thread, and StreamingResponse iterates the sync generator in a
+    threadpool, so the blocking Groq stream never stalls the event loop.
     """
     retriever = get_retriever()
     chunks = retriever.retrieve(query=query, top_k_retrieve=top_k_retrieve, top_k_rerank=top_k_rerank)
 
+    def sse(payload: dict) -> str:
+        return f"data: {json.dumps(payload)}\n\n"
+
     if not chunks:
-        async def no_docs():
-            yield "data: No relevant documents found.\n\n"
+        def no_docs():
+            yield sse({"type": "token", "text": "No relevant documents found."})
             yield "data: [DONE]\n\n"
         return StreamingResponse(no_docs(), media_type="text/event-stream")
 
     result = generate_answer(query, chunks, stream=True)
-    stream_gen = result["stream"]
-    response_chunks = result["chunks"]
 
-    async def event_stream():
+    def event_stream():
         full_text = ""
+        start = time.perf_counter()
         try:
-            for text_chunk in stream_gen:
-                full_text += text_chunk
-                yield f"data: {json.dumps({'type': 'token', 'text': text_chunk})}\n\n"
-                await asyncio.sleep(0)  # yield control
+            for token in result["stream"]:
+                full_text += token
+                yield sse({"type": "token", "text": token})
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+            yield sse({"type": "error", "text": str(e)})
 
-        # Send citations at end
-        import re
-        cited = set(int(m) for m in re.findall(r'\[Source (\d+)\]', full_text))
-        citations = []
-        for i, c in enumerate(response_chunks, start=1):
-            if i in cited:
-                citations.append({
-                    "source_n": i,
-                    "filename": c.get("filename", "Unknown"),
-                    "page": c.get("metadata", {}).get("page"),
-                    "text_preview": c["text"][:150]
-                })
-
-        yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+        yield sse({
+            "type": "citations",
+            "citations": extract_citations(full_text, result["chunks"]),
+            "latency_ms": round((time.perf_counter() - start) * 1000, 2),
+        })
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
